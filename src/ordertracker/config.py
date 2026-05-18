@@ -24,8 +24,36 @@ from cryptography.fernet import Fernet, InvalidToken
 
 try:  # Optional in dev; required in production
     import keyring
+    import keyring.errors
 except Exception:
     keyring = None  # type: ignore[assignment]
+
+
+def _keyring_get(service: str, key: str) -> str | None:
+    """Read from keyring, treating a missing backend as 'no value'.
+
+    On headless Linux (CI, servers) the `keyring` library imports cleanly but
+    has no backend registered, so `get_password` raises ``NoKeyringError`` at
+    call time. We swallow that so callers fall back to the env-var path.
+    """
+    if keyring is None:
+        return None
+    try:
+        return keyring.get_password(service, key)
+    except Exception as exc:  # NoKeyringError + any other backend-level issue
+        logger.debug("Keyring read failed for %s/%s: %s", service, key, exc)
+        return None
+
+
+def _keyring_set(service: str, key: str, value: str) -> bool:
+    if keyring is None:
+        return False
+    try:
+        keyring.set_password(service, key, value)
+        return True
+    except Exception as exc:
+        logger.debug("Keyring write failed for %s/%s: %s", service, key, exc)
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +81,24 @@ class AppConfig:
         self.archive_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _get_or_create_fernet_key() -> bytes:
-    if keyring is None:  # dev fallback — store next to .env
-        local_key_path = Path.cwd() / ".fernet_key"
-        if local_key_path.exists():
-            return local_key_path.read_bytes()
-        key = Fernet.generate_key()
-        local_key_path.write_bytes(key)
-        local_key_path.chmod(0o600)
-        return key
+def _local_key_fallback() -> bytes:
+    local_key_path = Path.cwd() / ".fernet_key"
+    if local_key_path.exists():
+        return local_key_path.read_bytes()
+    key = Fernet.generate_key()
+    local_key_path.write_bytes(key)
+    local_key_path.chmod(0o600)
+    return key
 
-    stored = keyring.get_password(KEYRING_SERVICE, KEYRING_FERNET_KEY)
+
+def _get_or_create_fernet_key() -> bytes:
+    stored = _keyring_get(KEYRING_SERVICE, KEYRING_FERNET_KEY)
     if stored:
         return stored.encode("utf-8")
     new_key = Fernet.generate_key()
-    keyring.set_password(KEYRING_SERVICE, KEYRING_FERNET_KEY, new_key.decode("utf-8"))
+    if not _keyring_set(KEYRING_SERVICE, KEYRING_FERNET_KEY, new_key.decode("utf-8")):
+        # Headless / no backend — fall back to an on-disk key file.
+        return _local_key_fallback()
     return new_key
 
 
@@ -75,15 +106,12 @@ def encrypt_database_url(url: str) -> None:
     """Encrypt + persist the DB URL in the OS keyring."""
     fernet = Fernet(_get_or_create_fernet_key())
     token = fernet.encrypt(url.encode("utf-8")).decode("utf-8")
-    if keyring is None:
+    if not _keyring_set(KEYRING_SERVICE, KEYRING_DB_URL_ENCRYPTED, token):
         raise RuntimeError("Keyring not available; cannot persist DB URL securely.")
-    keyring.set_password(KEYRING_SERVICE, KEYRING_DB_URL_ENCRYPTED, token)
 
 
 def _decrypt_database_url() -> str | None:
-    if keyring is None:
-        return None
-    token = keyring.get_password(KEYRING_SERVICE, KEYRING_DB_URL_ENCRYPTED)
+    token = _keyring_get(KEYRING_SERVICE, KEYRING_DB_URL_ENCRYPTED)
     if not token:
         return None
     try:
