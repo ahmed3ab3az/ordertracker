@@ -1,0 +1,63 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# PyInstaller
+*.spec
+!ordertracker.spec
+
+# Installer build outputs
+installer/Output/
+installer/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App runtime
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite3
+.cache/
+data/local/
+
+# Secrets / config
+.env
+.env.local
+secrets.json
+*.key
+*.pem
+
+# Archive output (local)
+archives/
+
+# Test
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Alembic
+# (keep alembic/ tracked, but ignore generated SQL dumps)
+*.sql.bak
