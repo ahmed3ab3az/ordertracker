@@ -18,29 +18,34 @@ branch_labels = None
 depends_on = None
 
 
-user_role = sa.Enum("ADMIN", "PARTNER", name="user_role")
-order_status = sa.Enum(
-    "NEW", "ON_HOLD", "DELIVERED", "POSTPONED", "RETURNED", name="order_status"
+# Use postgresql.ENUM with create_type=False so SQLAlchemy doesn't try to
+# auto-create the enum during table creation. We create the enums explicitly
+# once at the top of upgrade() with checkfirst=True.
+user_role = postgresql.ENUM("ADMIN", "PARTNER", name="user_role", create_type=False)
+order_status = postgresql.ENUM(
+    "NEW", "ON_HOLD", "DELIVERED", "POSTPONED", "RETURNED",
+    name="order_status", create_type=False,
 )
-day_state = sa.Enum("OPEN", "CLOSED", "REOPENED", name="day_state")
-audit_action = sa.Enum(
+day_state = postgresql.ENUM(
+    "OPEN", "CLOSED", "REOPENED", name="day_state", create_type=False,
+)
+audit_action = postgresql.ENUM(
     "CREATE", "UPDATE", "DELETE", "CLOSE", "REOPEN", "PRINT", "LOGIN", "LOGIN_FAILED",
-    name="audit_action",
+    name="audit_action", create_type=False,
 )
-entity_type = sa.Enum(
+entity_type = postgresql.ENUM(
     "order", "production_company", "importing_company", "partner", "user",
     "day", "partner_share", "snapshot",
-    name="entity_type",
+    name="entity_type", create_type=False,
 )
+
+_ENUMS = (user_role, order_status, day_state, audit_action, entity_type)
 
 
 def upgrade() -> None:
     bind = op.get_bind()
-    user_role.create(bind, checkfirst=True)
-    order_status.create(bind, checkfirst=True)
-    day_state.create(bind, checkfirst=True)
-    audit_action.create(bind, checkfirst=True)
-    entity_type.create(bind, checkfirst=True)
+    for enum in _ENUMS:
+        enum.create(bind, checkfirst=True)
 
     op.create_table(
         "users",
@@ -215,8 +220,5 @@ def downgrade() -> None:
     op.drop_table("users")
 
     bind = op.get_bind()
-    entity_type.drop(bind, checkfirst=True)
-    audit_action.drop(bind, checkfirst=True)
-    day_state.drop(bind, checkfirst=True)
-    order_status.drop(bind, checkfirst=True)
-    user_role.drop(bind, checkfirst=True)
+    for enum in reversed(_ENUMS):
+        enum.drop(bind, checkfirst=True)
